@@ -343,6 +343,7 @@ chatbot_prompt = ChatPromptTemplate.from_messages([
         If the information is not available in the reviews, answer the question nonetheless, but also say that the question was unrelated to the reviews.
         Please refrain from saying that all the reviews say the same thing, as you will be given only the fraction of all reviews. Instead, say that all the reviews you found said the same.
         Keep your responses concise, focused on the question, and ensure they are grounded in the feedback from the reviews. 
+        You have to answer the user's question in the same language as the question.
         --- Summary ---
         {summary}
         --- Reviews relevant to the question ---
@@ -368,36 +369,17 @@ _mrpt = RunnableWithMessageHistory(
 )
 
 mrpt = RunnableLambda(lambda question : _mrpt.invoke(question,config={"configurable":{"session_id":"ecyc_e"}}))
-def call_app(input: dict):
-    config={"configurable": {"thread_id": "abc456"}}
-    input_messages = [HumanMessage(input['query'])]
-    string=input['vectorstore'].similarity_search(query=input['query'], k = 8)
-    output = mrpt.invoke(
-        {"messages": input_messages, "string": string, "summary": input['summary']},
-        config,
-    )
-    return output
-
-async def talk(setup: dict):
-    while True:
-        question = st.chat_input("질문을 입력하세요")
-        if question == "":
-            print("\x1b[31m<(종료)\x1b[39m")
-            break
-        print(f"\x1b[33m<\x1b[39m {question}")
-        out = await chain.ainvoke({"summary": setup['summary'],"vectorstore": setup['vectorstore'],"query": question})
-        print(f"\x1b[34m>\x1b[39m {out.content}",flush=True)
-
-chain = RunnableLambda(call_app)
 
 async def depos_setup(loadfile, link): # 디포즈 셋업 해주시죠
     if loadfile:
         setup = {}
         try:
-            with open("setup.dat", "rb") as f:
-                load = f.read().split(separator)
-                setup['summary'] = str(load[0], encoding="utf-8")
-                setup['vectorstore'] = FAISS.deserialize_from_bytes(load[1], embeddings=embeddings, allow_dangerous_deserialization=True)
+            sta.write(f"[{str(datetime.datetime.now().time())[0:8]}] 파일 읽는 중")
+            sta.update(label=f"파일 읽는 중")
+            f = ss["uploaded"]
+            load = f.read().split(separator)
+            setup['summary'] = str(load[0], encoding="utf-8")
+            setup['vectorstore'] = FAISS.deserialize_from_bytes(load[1], embeddings=embeddings, allow_dangerous_deserialization=True)
         except Exception as e:
             print(f"\x1b[31m{repr(e)}\x1b[39m")
             ss["loaderror"] = True
@@ -416,31 +398,53 @@ async def depos_setup(loadfile, link): # 디포즈 셋업 해주시죠
     sta.update(label=f"준비 완료", state="complete", expanded=False)
     ss["setup_dict"] = setup
     ss["setup"] = True
-    error_place.container(border=True).text(ss.setup_dict['summary'])
+    with error_place.container(border=True):
+        with st.spinner(text="요약 다듬는 중"):
+            summary = (rpt|StrOutputParser()).invoke(f"Summarize the following in less than 120 words. The summary should be in Korean.\n\n{ss.setup_dict['summary']}")
+            ss["summary_kor"] = summary
+    return "done"
 
-"""async def chatbot(loadfile, link):
-    if loadfile:
-        setup = {}
-        try:
-            with open("setup.dat", "rb") as f:
-                load = f.read().split(separator)
-                setup['summary'] = str(load[0], encoding="utf-8")
-                setup['vectorstore'] = FAISS.deserialize_from_bytes(load[1], embeddings=embeddings, allow_dangerous_deserialization=True)
-        except Exception as e:
-            print(f"\x1b[31m{repr(e)}\x1b[39m")
-            ss["loaderror"] = True
-            st.rerun()
-    else:
-        setup = await setup_chain.ainvoke({"link":link})
-    sta.write(f"[{str(datetime.datetime.now().time())[0:8]}] 준비 완료")
-    sta.update(label=f"준비 완료", state="complete")
-    await talk(setup)
-    save_setup = st.chat_input("리뷰 요약본을 파일에 저장하시려면 Y를 입력하세요.")
-    if save_setup == 'Y' or save_setup == 'y':
-        try:
-            with open("setup.dat", "wb") as f:
-                f.write(bytes(setup['summary'], encoding="utf-8"))
-                f.write(separator)
-                f.write(setup['vectorstore'].serialize_to_bytes())
-        except:
-            print("리뷰 요약본 저장에 실패했습니다.")"""
+
+def call_app(input: dict):
+    config={"configurable": {"thread_id": "abc456"}}
+    input_messages = [HumanMessage(input['query'])]
+    string=input['vectorstore'].similarity_search(query=input['query'], k = 8)
+    output = mrpt.invoke(
+        {"messages": input_messages, "string": string, "summary": input['summary']},
+        config,
+    )
+    return output
+
+chain = RunnableLambda(call_app)
+async def talk(setup: dict, question: str):
+    print(f"\x1b[33m<\x1b[39m {question}")
+    out = await chain.ainvoke({"summary": setup['summary'],"vectorstore": setup['vectorstore'],"query": question})
+    print(f"\x1b[34m>\x1b[39m {out.content}",flush=True)
+    return out.content
+
+# """async def chatbot(loadfile, link):
+#     if loadfile:
+#         setup = {}
+#         try:
+#             with open("setup.dat", "rb") as f:
+#                 load = f.read().split(separator)
+#                 setup['summary'] = str(load[0], encoding="utf-8")
+#                 setup['vectorstore'] = FAISS.deserialize_from_bytes(load[1], embeddings=embeddings, allow_dangerous_deserialization=True)
+#         except Exception as e:
+#             print(f"\x1b[31m{repr(e)}\x1b[39m")
+#             ss["loaderror"] = True
+#             st.rerun()
+#     else:
+#         setup = await setup_chain.ainvoke({"link":link})
+#     sta.write(f"[{str(datetime.datetime.now().time())[0:8]}] 준비 완료")
+#     sta.update(label=f"준비 완료", state="complete")
+#     await talk(setup)
+#     save_setup = st.chat_input("리뷰 요약본을 파일에 저장하시려면 Y를 입력하세요.")
+#     if save_setup == 'Y' or save_setup == 'y':
+#         try:
+#             with open("setup.dat", "wb") as f:
+#                 f.write(bytes(setup['summary'], encoding="utf-8"))
+#                 f.write(separator)
+#                 f.write(setup['vectorstore'].serialize_to_bytes())
+#         except:
+#             print("리뷰 요약본 저장에 실패했습니다.")"""
