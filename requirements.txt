@@ -1,0 +1,8 @@
+streamlit
+pandas
+selenium
+langchain
+langchain-openai
+langchain-community
+langgraph
+faiss-cpu
